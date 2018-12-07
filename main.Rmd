@@ -1,0 +1,40 @@
+---
+title: "trabajoCursoADR"
+author: "Gustavo Rivas Gervilla"
+date: "7 de diciembre de 2018"
+output: pdf_document
+header-includes:
+  - \input{packages.tex}
+  - \input{paleta_cursoR.tex}
+  - \input{config.tex}
+  - \input{lstconfig.tex}
+---
+\pagenumbering{gobble}
+\title{\textcolor{palette4}{Trabajo Curso Avanzado de Análisis de Datos en \texttt{R}}}
+\author{Gustavo Rivas Gervilla}
+
+\maketitle
+
+\newpage
+\pagenumbering{arabic}
+
+\section{Análisis del Dataset}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_knit$set(out.format = "latex")
+knitr::knit_hooks$set(source = function(x, options) {
+  paste("\\begin{lstlisting}[style = global]",
+        paste(x, collapse = "\n"),
+        "\\end{lstlisting}",
+        sep = "\n"
+  )
+})
+```
+
+
+```{r}
+#Cargamos los datos del experimento.
+data = load("text.RData")
+```
+
