@@ -4,10 +4,12 @@ author: "Gustavo Rivas Gervilla"
 date: "7 de diciembre de 2018"
 output: pdf_document
 header-includes:
+  - \usepackage{graphicx}
   - \input{packages.tex}
   - \input{paleta_cursoR.tex}
   - \input{config.tex}
   - \input{lstconfig.tex}
+keep_tex: true
 ---
 \pagenumbering{gobble}
 \title{\textcolor{palette4}{Trabajo Curso Avanzado de Análisis de Datos en \texttt{R}}}
@@ -16,6 +18,11 @@ header-includes:
 \maketitle
 
 \newpage
+
+\tableofcontents
+
+\newpage
+
 \pagenumbering{arabic}
 
 \section{Análisis del Dataset}
@@ -32,9 +39,33 @@ knitr::knit_hooks$set(source = function(x, options) {
 })
 ```
 
-
-```{r}
-#Cargamos los datos del experimento.
-data = load("text.RData")
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+library(tm)
+library(proxy)
 ```
 
+Para el desarrollo de este trabajo vamos emplear dos paquetes principalmente:
+
+* El paquete `tm` que es un paquete con herramientas para text-mining.
+* El paquete `proxy` que es un paquete que nos permite calcular medidas de distancia y de similaridad.
+
+Ahora vamos a cargar los datos del experimento, en este caso disponemos de dos elementos:
+
+* Por un lado tenemos un dataset donde se recogen diversos textos, en concreto se trata de titulares de notificias de salud. Este dataset cuenta con las siguientes variables:
+  * `ID`: Un identificador del texto.
+  * `datetime`: La fecha y la hora en la que se obtuvieron dichos textos.
+  * `content`: El titular de la noticia junto con la URL de dicha noticia.
+  * `label`: La fuente de la noticia.
+* Por otro lado tenemos el elemento `corpus` donde se han eliminado los elementos innecesarios de los titulares, como son esas URLs de las que hablábamos y tenemos la información organizada en forma de lista.
+
+```{r}
+load("text.RData")
+```
+
+El dataset tiene un total de `r nrow(data.raw)` observaciones, los titulares, ya preprocesados, los podemos encontrar en `corpus$content`:
+
+```{r}
+head(corpus$content)
+```
+
+\section{Preparativos para el análisis cluster}
