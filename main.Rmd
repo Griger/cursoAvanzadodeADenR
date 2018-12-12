@@ -40,8 +40,22 @@ knitr::knit_hooks$set(source = function(x, options) {
 ```
 
 ```{r, echo = TRUE, message=FALSE, warning=FALSE}
+library(NbClust)
 library(tm)
 library(proxy)
+library(dendextend)
+library(ggplot2)
+```
+
+```{r, include = FALSE}
+paleta <- c(
+  `palette2` = rgb(72.28,63.24,102,maxColorValue = 255),
+  `complementary2` = rgb(92.96,102,63.24,maxColorValue = 255),
+  `analogous21` = rgb(91.66,63.24,102,maxColorValue = 255),
+  `analogous22` = rgb(63.24,73.58,102,maxColorValue = 255),
+  `triadic21` = rgb(102,72.28,63.24,maxColorValue = 255),
+  `triadic22` = rgb(63.24,102,72.28,maxColorValue = 255)
+) 
 ```
 
 Para el desarrollo de este trabajo vamos emplear dos paquetes principalmente:
@@ -69,3 +83,73 @@ head(corpus$content)
 ```
 
 \section{Preparativos para el análisis cluster}
+
+Lo primero que vamos a hace es crear una `DocumentTermMatrix` en esta matriz tendremos una columna por cada término que localicemos en el conjunto de documentos que analicemos, y tendremos una fila por cada documento analizado. Entonces tendremos información sobre qué términos aparecen en qué documentos, y cuántas veces aparecen (una pequeña introducción a las *Document-term matrix* la podemos encontrar [aquí](https://en.wikipedia.org/wiki/Document-term_matrix)).
+
+En este caso le decimos al comando que elimine los signos de puntuación de los textos a tokenizar (de donde va a sacar los distintos términos que se van a introducir en la matriz), le decimos que no tenga en cuenta las *stopwords* y que el lenguaje que ha de utilizar para hacer esto es el inglés.
+
+```{r}
+m <- DocumentTermMatrix(corpus, control = list(removePunctuation = TRUE, stopwords = TRUE, language="en"))
+```
+
+En nuestro caso se obtienen `r length(m$dimnames$Terms)` distintos, mostramos algunos a continuación:
+
+```{r}
+head(m$dimnames$Terms, n =  20)
+```
+
+Como vemos obtenemos el token "\pounds 5m", quizás sería necesario un procesado más completo del corpus para no obtener este tipo de tokens, añadir la opción `removeNumbers` al obtener la matriz anterior lo único que hace es eliminar el "5", pero no hace que no se tome ese token concreto.
+
+Ahora vamos a asignar a cada término un peso según la medida TF-IDF, con esto obtendremos el peso que tiene cada término que hemos obtenido en la matriz anterior sobre cada uno de los documentos que componen nuestro corpus.
+
+Esta medida se calcula [como sigue](https://es.wikipedia.org/wiki/Tf-idf), dada una colección de documentos $D$, un término $t$ y un documento $d \in D$:
+
+1. Calculamos $tf(t,d) = \frac{f(t,d)}{max\lbrace f(t,d) \mid t \in d \rbrace}$ donde $f(t,d)$ es el número de veces que el término $t$ aparece en el documento $d$. Que nos da una medida de cómo de importante es el término $t$ en el documento $d$ con respecto al resto de términos que aparecen en ese documento.
+2. Calculamos $idf(t,D) = log\frac{\mid D \mid}{\mid \lbrace d \in D \mid t \in d \rbrace\mid}$ que nos da una medida de si el término es común o no en la colección de documentos.
+3. Finalmente calculamos ya la medida final $tfidf(t,d,D) = tf(t,d) \times idf(t,D)$, así un alto peso de esta medida se da (según el enlace que hemos agragado al comienzo de esta explicación) cuando el término $t$ se da con una elevada frecuencia en el documento $d$, y no es un término muy común en la colección de documentos.
+
+```{r}
+weights.m <- as.matrix(weightTfIdf(m))
+```
+
+Ahora ya tenemos una matriz en la que cada uno de los `r length(m$dimnames$Terms)` que hemos encontrado en el corpus, tiene un peso para cada uno de los documentos. Así podemos comparar distancias entre los documentos usando las distancias entre estos vectores, algo que recuerda al paradigma *word2vec* tan utilizado en las tareas de *text-mining*.
+
+Ahora con estos vectores vamos a construir una matriz de distancias entre los distintos documentos que tenemos en nuestra colección, para ello vamos a emplear el [método de los cosenos](https://en.wikipedia.org/wiki/Cosine_similarity), que es un método muy utilizado en el campo del text-mining:
+
+```{r}
+dist.m <- dist(weights.m, method = "cosine")
+```
+
+Ahora ya podemos pasar a realizar los análisis cluster pertinentes:
+
+\section{Análisis cluster jerárquico con el método \texttt{ward.D2}}
+
+En primer lugar vamos a realizar un análisis cluster jerárquico, usando la matriz de distancias anteriormente obtenida. En nuestro caso vamos a emplear el método [`ward.D2`](https://en.wikipedia.org/wiki/Ward%27s_method) para obtener dicho cluster. En este método dos clusters se unen si son los que incrementan de forma mínima la varianza intra-cluster.
+
+```{r}
+ward.cluster <- hclust(dist.m, method = "ward.D2")
+```
+
+Vamos a dibujar a continuación el dendograma obtenido siguiendo algunas de las ideas que hemos encontrado en un [enlace](http://www.sthda.com/english/wiki/beautiful-dendrogram-visualizations-in-r-5-must-known-methods-unsupervised-machine-learning) sobre la representación de dendogramas en `R`.
+
+```{r fig.width=10, fig.height=10, warning=FALSE}
+hcd <- as.dendrogram(ward.cluster)
+dend <- hcd %>% set("branches_k_color", value = paleta, k=6) %>%set("branches_lwd", 0.5) %>%
+   set("labels_color", "black") %>% set("labels_cex", 0.4) %>% 
+   set("leaves_pch", 19) %>% set("leaves_col", c(paleta["palette2"], paleta["complementary2"]))
+ggd1 <- as.ggdend(dend)
+ggplot(ggd1) + scale_y_reverse(expand = c(0.2, 0)) + coord_polar(theta="x")
+```
+
+```{r}
+cor(dist.m, cophenetic(ward.cluster))
+```
+
+```{r}
+aux <- NbClust(weights.m, diss = dist.m, distance = NULL, min.nc = 2, max.nc = 20, method = "ward.D2", index = c("gap", "silhouette"))
+```
+
+
+\section{Análisis cluster mediante el método de las k-medias}
+
+
