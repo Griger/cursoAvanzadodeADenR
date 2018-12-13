@@ -16,6 +16,10 @@ keep_tex: true
 \author{Gustavo Rivas Gervilla}
 
 \maketitle
+\begin{figure}
+\centering
+\includegraphics[width = 0.3\textwidth]{ugr.png}
+\end{figure}
 
 \newpage
 
@@ -29,7 +33,7 @@ keep_tex: true
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-#knitr::opts_knit$set(out.format = "latex")
+knitr::opts_chunk$set(comment = NA)
 knitr::knit_hooks$set(source = function(x, options) {
   paste("\\begin{lstlisting}[style = global]",
         paste(x, collapse = "\n"),
@@ -45,6 +49,7 @@ library(tm)
 library(proxy)
 library(dendextend)
 library(ggplot2)
+library(ggpubr)
 ```
 
 ```{r, include = FALSE}
@@ -89,7 +94,7 @@ Lo primero que vamos a hace es crear una `DocumentTermMatrix` en esta matriz ten
 En este caso le decimos al comando que elimine los signos de puntuación de los textos a tokenizar (de donde va a sacar los distintos términos que se van a introducir en la matriz), le decimos que no tenga en cuenta las *stopwords* y que el lenguaje que ha de utilizar para hacer esto es el inglés.
 
 ```{r}
-m <- DocumentTermMatrix(corpus, control = list(removePunctuation = TRUE, stopwords = TRUE, language="en"))
+m <- DocumentTermMatrix(corpus, control = list(removePunctuation = TRUE, stopwords = TRUE, removeNumbers = TRUE, language="en"))
 ```
 
 En nuestro caso se obtienen `r length(m$dimnames$Terms)` distintos, mostramos algunos a continuación:
@@ -98,7 +103,7 @@ En nuestro caso se obtienen `r length(m$dimnames$Terms)` distintos, mostramos al
 head(m$dimnames$Terms, n =  20)
 ```
 
-Como vemos obtenemos el token "\pounds 5m", quizás sería necesario un procesado más completo del corpus para no obtener este tipo de tokens, añadir la opción `removeNumbers` al obtener la matriz anterior lo único que hace es eliminar el "5", pero no hace que no se tome ese token concreto.
+Como vemos obtenemos el token "\pounds m", quizás sería necesario un procesado más completo del corpus para no obtener este tipo de tokens, añadir la opción `removeNumbers` al obtener la matriz anterior lo único que hace es eliminar el "5", pero no hace que no se tome ese token concreto.
 
 Ahora vamos a asignar a cada término un peso según la medida TF-IDF, con esto obtendremos el peso que tiene cada término que hemos obtenido en la matriz anterior sobre cada uno de los documentos que componen nuestro corpus.
 
@@ -134,22 +139,140 @@ Vamos a dibujar a continuación el dendograma obtenido siguiendo algunas de las 
 
 ```{r fig.width=10, fig.height=10, warning=FALSE}
 hcd <- as.dendrogram(ward.cluster)
-dend <- hcd %>% set("branches_k_color", value = paleta, k=6) %>%set("branches_lwd", 0.5) %>%
-   set("labels_color", "black") %>% set("labels_cex", 0.4) %>% 
-   set("leaves_pch", 19) %>% set("leaves_col", c(paleta["palette2"], paleta["complementary2"]))
+dend <- hcd %>% set("branches_k_color", value = paleta, k=6) %>%
+        set("branches_lwd", 0.5) %>%
+        set("labels_color", "black") %>% 
+        set("labels_cex", 0.4) %>%
+        set("leaves_pch", 19) %>% 
+        set("leaves_col", c(paleta["palette2"], paleta["complementary2"]))
 ggd1 <- as.ggdend(dend)
 ggplot(ggd1) + scale_y_reverse(expand = c(0.2, 0)) + coord_polar(theta="x")
 ```
+
+Vamos a analizar un par de parejas de documentos en nuestra colección a la luz de los emparejamientos que podemos observar en el dendograma anterior. Por un lado vamos a ver los titulares 64 y 70, que se separan en el último nivel del cluster jerárquico. Y luego vamos a comparar el artículo 70 con, por ejemplo, el 87. El 70 estaría dentro del cluster que se forma al comienzo de la jerarquía (rama morada), y en cambio el 87 pertenece al cluster negro que se forma al mismo nivel que el anterior (en la ramificación marrón), con lo que serían dos titulares que según esta jerarquía están completamente separados.
+
+```{r}
+corpus$content[64]
+corpus$content[70]
+corpus$content[87]
+```
+
+Si nos fijamos el parecido entre los dos primeros titulares se concentra sólo en la palabra "way" ya que si revisamos el contenido de `m$dimnames$Terms` vemos que la palabra "to" no ha sido seleccionada como token, debido a que hemos habilitado la opción para que no se tengan en cuenta las *stopwords* del lenguaje.
+
+En cambio, el titular 87 no tiene ningún término en común con el 70. Veamos ahora el peso que tienen los términos con un peso mayor que cero para los titulares 64 y 70:
+
+```{r}
+weights.m[64,weights.m[64,] > 0]
+weights.m[70,weights.m[70,] > 0]
+```
+
+Aquí nos damos cuenta en primer lugar de que el preprocesado que hemos realizado sobre los titulares no es del todo bueno ya que deberíamos haber eliminado las URLs por completo de los titulares, para no obtener como tokens términos como "http", "com"o "jpg", que son términos en los que en cierta medida también coinciden los dos titulares, y que por tanto pueden lleva a un mal cluster.
+
+Por otro lado el término "way", que es una palabra que sí que tiene sentido tenerla en cuenta como token, vemos que no tiene un peso demasiado elevado si tenemos en cuenta que el peso máximo asignado a un término dentro del corpus es `r max(weights.m)`. Con lo que podemos pensar que quizás nuestro cluster no es demasiado bueno, o bien los documentos a clusterizar no lo son. Vamos a calcular el coeficiente de correlación cofenético:
 
 ```{r}
 cor(dist.m, cophenetic(ward.cluster))
 ```
 
+Como podemos ver es bajo; a la luz de esta medida el cluster jerárquico obtenido no es bueno. Vamos a intentar obtener un mejor corpus eliminando por completo las URLs de los titulares y vamos a repetir el mismo proceso anterior.
+
 ```{r}
-aux <- NbClust(weights.m, diss = dist.m, distance = NULL, min.nc = 2, max.nc = 20, method = "ward.D2", index = c("gap", "silhouette"))
+new.data <- data.raw
+new.data$content <- gsub("http.*", "", new.data$content)
+new.corpus <- VCorpus(VectorSource(new.data$content))
+new.m <- DocumentTermMatrix(new.corpus, control = list(removePunctuation = TRUE, stopwords = TRUE, removeNumbers = TRUE, language="en"))
+new.weights.m <- as.matrix(weightTfIdf(new.m))
+new.dist.m <- dist(new.weights.m, method = "cosine")
+new.ward.cluster <- hclust(new.dist.m, method = "ward.D2")
 ```
 
+En este caso el coeficiente de correlación cofenético es `r cor(new.dist.m, cophenetic(new.ward.cluster))`, con lo que hemos mejorado ligeramente los resultados con respecto a esta medida. Podríamos decir que eliminar las URLs hace que se dejen de considerar tokens que realmente no aportan información para la clasificación de los documentos.
+
+Ahora vamos a intentar encontrar el número óptimo de clusters para ello vamos a usar alguna idea encontrada en un [enlace](http://www.sthda.com/english/wiki/print.php?id=239) al respecto. En concreto vamos a emplear el método `NbClust` del paquete [`NbClust`](https://cran.r-project.org/web/packages/NbClust/NbClust.pdf). En nuestro caso vamos a emplear 3 índices distintos que son los que se mencionan [aquí](https://en.wikipedia.org/wiki/Cluster_analysis#Evaluation_and_assessment) como índices dentro de los índices de evaluación internos (no necesitamos datos externos para evaluar el cluster obtenido):
+
+* **Davies-Bouldin index**: de acuerdo a la documentación del paquete `NbClust` el número óptimo de clusters se alcanza con el mínimo valor del índice.
+* **Dunn index**: en este caso se alcanza con el máximo valor del índice.
+* **Silhouette index**: en este caso se alcanza nuevamente con el máximo valor del índice.
+
+```{r, cache=TRUE, warning=FALSE}
+db.coefficients <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "ward.D2", index = "db")
+dunn.coefficients <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "ward.D2", index = "dunn")
+silhouette.coefficients <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "ward.D2", index = "silhouette")
+```
+
+```{r, include = FALSE}
+coefficients.df <- data.frame("db" = db.coefficients$All.index, "dunn" = dunn.coefficients$All.index, "sil" = silhouette.coefficients$All.index)
+```
+
+```{r, warning = FALSE, message=FALSE}
+ggplot(data = coefficients.df) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = db, colour = "db")) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = dunn, colour = "dunn")) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = sil, colour = "sil")) +
+  scale_color_manual(name = "index", labels = c("sil","dunn","db"), values = paleta[1:3]) +
+  scale_colour_manual("index",
+                      breaks = c("db", "dunn", "sil"),
+                      values = c("#483F66", "#66483F", "#3F6648")) +
+  xlab("#cluster") + ylab("index")
+```
+
+Según esta gráfica podemos ver que cuanto mayor sea el número de clusters mejor es la clasificación obtenida. De aquí, podríamos deducir que quizás estos textos no puedan ser agrupados de una forma lógica, y que por tanto la mejor clasificación es la que obtenemos al obtener un cluster por documento.
 
 \section{Análisis cluster mediante el método de las k-medias}
 
+Vamos a continuar trabajando con el corpus que hemos creado en la sección anterior, en el que eliminábamos completamente las URLs de los titulares. Y vamos a realizar el mismo análisis sobre la bondad del número de clusters para el método de las k-medias:
 
+```{r, cache=TRUE, warning=FALSE}
+db.coefficients.k <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "kmeans", index = "db")
+dunn.coefficients.k <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "kmeans", index = "dunn")
+silhouette.coefficients.k <- NbClust(new.weights.m, diss = new.dist.m, distance = NULL, min.nc = 2, max.nc = 100, method = "kmeans", index = "silhouette")
+```
+
+```{r, include = FALSE}
+coefficients.k.df <- data.frame("db" = db.coefficients.k$All.index, "dunn" = dunn.coefficients.k$All.index, "sil" = silhouette.coefficients.k$All.index)
+```
+
+```{r, warning = FALSE, message=FALSE}
+ggplot(data = coefficients.k.df) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = db, colour = "db")) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = dunn, colour = "dunn")) +
+  geom_line(aes(x = as.numeric(row.names(coefficients.df)), y = sil, colour = "sil")) +
+  scale_color_manual(name = "index", labels = c("sil","dunn","db"), values = paleta[1:3]) +
+  scale_colour_manual("index",
+                      breaks = c("db", "dunn", "sil"),
+                      values = c("#483F66", "#66483F", "#3F6648")) +
+  xlab("#cluster") + ylab("index")
+```
+
+Aquí podemos observar una tendencia similar a la anterior, salvo quizás para el índice de Dunn, en el que la calidad del cluster se mantiene prácticamente constante salvo cuando el número de clusters aumenta más allá de los 75. Por otro lado la tendencia es más pronunciada en el coeficiente de silueta que para el cluster jerárquico.
+
+Vamos a comparar ahora los índices para ambos clusters:
+
+```{r, include = FALSE, warning = FALSE, message=FALSE}
+db.comp <- ggplot() +
+  geom_line(data = coefficients.df, aes(x = as.numeric(row.names(coefficients.df)), y = db, linetype = "ward.D2"), colour = paleta["palette2"]) +
+  geom_line(data = coefficients.k.df, aes(x = as.numeric(row.names(coefficients.df)), y = db, linetype = "kmeans"), colour = paleta["palette2"]) +
+  xlab("#cluster") + ylab("db index") + labs(linetype='method') 
+```
+
+```{r, include = FALSE, warning = FALSE, message=FALSE}
+dunn.comp <- ggplot() +
+  geom_line(data = coefficients.df, aes(x = as.numeric(row.names(coefficients.df)), y = dunn, linetype = "ward.D2"), colour = paleta["palette2"]) +
+  geom_line(data = coefficients.k.df, aes(x = as.numeric(row.names(coefficients.df)), y = dunn, linetype = "kmeans"), colour = paleta["palette2"]) +
+  xlab("#cluster") + ylab("dunn index") + labs(linetype='method')
+```
+
+```{r, include = FALSE, warning = FALSE, message=FALSE}
+sil.comp <- ggplot() +
+  geom_line(data = coefficients.df, aes(x = as.numeric(row.names(coefficients.df)), y = sil, linetype = "ward.D2"), colour = paleta["palette2"]) +
+  geom_line(data = coefficients.k.df, aes(x = as.numeric(row.names(coefficients.df)), y = sil, linetype = "kmeans"), colour = paleta["palette2"]) +
+  xlab("#cluster") + ylab("sil index") + labs(linetype='method')
+```
+
+```{r}
+ggarrange(db.comp, dunn.comp, sil.comp, nrow = 1, ncol = 3, common.legend = TRUE, legend = "bottom")
+```
+
+Podemos ver que el método de las k-medias obtiene mejores resultados para los índices de silueta y el de Davies y Bouldin. Además, para el índice de Dunn el método de las k-medias escogería un menor número de clusters.
+
+Podríamos decir, según la tendencia en el índice de Dunn, que el método de las k-medias es capaz de encontrar una mejor clasificación no-trivial (sin crear un cluster por documento) que el método jerárquico. Además, como hemos dicho, el cluster de las k-medias funciona mejor que el obtenido por el método jerárquico ward.D2.
